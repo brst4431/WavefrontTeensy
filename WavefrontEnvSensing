@@ -1,0 +1,483 @@
+#include "WAVEFRONT.h"  // Header file created by AWESoMe project manager Owen L. for reading data off the temperature sensors and accelerometers
+
+unsigned char ACC1_CS = 3; // Declares a accelerometer object using CS on PIN0. This is the upper left (by the USB connector) connection.
+unsigned char ACC2_CS = 2; //PIN1
+unsigned char ACC3_CS = 4; //PIN2
+unsigned char ACC4_CS = 1; //PIN3
+unsigned char ACC5_CS = 6; //PIN4
+unsigned char ACC6_CS = 5; //PIN5
+ADXL344 ACC1(ACC1_CS);
+ADXL344 ACC2(ACC2_CS);
+ADXL344 ACC3(ACC3_CS);
+ADXL344 ACC4(ACC4_CS);
+ADXL344 ACC5(ACC5_CS);
+ADXL344 ACC6(ACC6_CS);
+
+unsigned char TS1_CS = 7; //PIN6
+unsigned char TS2_CS = 8; //PIN7
+unsigned char TS3_CS = 9; //PIN8
+unsigned char TS4_CS = 10; //PIN9
+unsigned char TS5_CS = 11; //PIN10
+unsigned char TS6_CS = 12; //PIN11
+ADT7320 TS1(TS1_CS);
+ADT7320 TS2(TS2_CS);
+ADT7320 TS3(TS3_CS);
+ADT7320 TS4(TS4_CS);
+ADT7320 TS5(TS5_CS);
+ADT7320 TS6(TS6_CS);
+
+//Time variables
+unsigned char UL = 0; //Microseconds low byte
+unsigned char UH = 0; //Microseconds high byte
+unsigned char ML = 0; //Milliseconds low byte
+unsigned char MH = 0; //Milliseconds high byte
+unsigned char SL = 0; //Seconds low byte
+unsigned char SH = 0; //Seconds high byte
+unsigned int S = 0; //Seconds
+unsigned int Mi = 0; //Milliseconds
+unsigned int U = 0; //Microseconds
+unsigned long start_micros = 0; //Starting time of program
+unsigned long current_micros = 0; //Current time of program
+unsigned long difference = 0; //Difference between current time and start time of program
+unsigned int prev_s = 0; //Needed to account for rollover in the seconds variable
+unsigned char n = 0; //Needed to account for rollover in the seconds variable
+
+unsigned long prev_S = 0; //Needed to set the frequency of temperature measurements
+unsigned long prev_millis = 0; //Needed to set the frequency of accelerometer measurements
+
+void setup() {
+  // put your setup code here, to run once:
+
+  Serial.begin(9600);     // Beginning Serial so we can see whats happening
+  start_micros = micros(); //Start the time
+  SPI.begin();            // Start the SPI library
+  TS1.initialize();       // Initialize the temperature sensors (this sets the CS pin as output, and also chooses the high resolution and continuous update modes of the temperature sensors)
+  TS2.initialize();
+  TS3.initialize(); 
+  TS4.initialize(); 
+  TS5.initialize(); 
+  TS6.initialize();  
+  
+  ACC1.initialize();      // Initialize the accelerometers (this sets the CS pin as output, and sets some registers appropriately)
+  ACC2.initialize(); 
+  ACC3.initialize(); 
+  ACC4.initialize(); 
+  ACC5.initialize(); 
+  ACC6.initialize(); 
+}
+
+
+
+void loop() {
+  // put your main code here, to run repeatedly:
+
+  //Time Tracking Loop
+  current_micros = micros(); //Get current time in microseconds
+  difference = (current_micros-start_micros); 
+  S = difference/1000000; //Find current number of seconds elapsed
+  difference = (difference - S*1000000);
+  Mi = difference/1000; //Find number of milliseconds elapsed after our seconds count
+  difference = (difference - Mi*1000);
+  U = difference; //Find number of microseconds elapsed after our seconds count
+  if(S < prev_s)
+  {
+    n++;
+    S += 4294*n; //4294 seconds is when micros() rolls over, so this makes sure the seconds variable S keeps counting
+  }
+  // Convert to high byte low byte configuration
+  SH = ((S  & 0xFF00) >> 8);
+  SL = ((S  & 0x00FF) >> 0);
+  MH = ((Mi & 0xFF00) >> 8);
+  ML = ((Mi & 0x00FF) >> 0);
+  UH = ((U  & 0xFF00) >> 8);
+  UL = ((U  & 0x00FF) >> 0);
+  prev_s = S;
+
+//  _______                                  _                     _____                               
+// |__   __|                                | |                   / ____|                              
+//    | | ___ _ __ ___  _ __   ___ _ __ __ _| |_ _   _ _ __ ___  | (___   ___ _ __  ___  ___  _ __ ___ 
+//    | |/ _ \ '_ ` _ \| '_ \ / _ \ '__/ _` | __| | | | '__/ _ \  \___ \ / _ \ '_ \/ __|/ _ \| '__/ __|
+//    | |  __/ | | | | | |_) |  __/ | | (_| | |_| |_| | | |  __/  ____) |  __/ | | \__ \ (_) | |  \__ \
+//    |_|\___|_| |_| |_| .__/ \___|_|  \__,_|\__|\__,_|_|  \___| |_____/ \___|_| |_|___/\___/|_|  |___/
+//                     | |                                                                             
+//                     |_|                                                                             
+
+if (S > prev_S) //This if statement sets the frequency of the temperature measurements to 1 Hz
+{
+  prev_S = S;
+  //Temperature Sensor 1
+  TS1.read_status();                       
+  TS1.read_config();   
+  int temp_counts1 = TS1.read_temperature();  // This reads the last temperature value as a number of ADC bins. Despite having an output argument the latest value is also saved in the ADT7320 object TS
+  int temp_counts1_H = ((temp_counts1  & 0xFF00) >> 8);
+  int temp_counts1_L = ((temp_counts1  & 0x00FF) >> 0);
+  //float temperature1 = (temp_counts1)/(128.0); // This is the formula to get temperature from counts, but only in high resolution (16b) mode.
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x01); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000111); //sensor ID (1-12)
+  Serial.write(temp_counts1_H); //Temperature sensor counts high byte
+  Serial.write(temp_counts1_L); //Temperature sensor counts low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_temp1 = temp_counts1_H ^ temp_counts1_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_temp1); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  //Temperature Sensor 2
+  TS2.read_status();                       
+  TS2.read_config();                        
+  int temp_counts2 = TS2.read_temperature();  
+  int temp_counts2_H = ((temp_counts2  & 0xFF00) >> 8);
+  int temp_counts2_L = ((temp_counts2  & 0x00FF) >> 0); 
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x01); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00001000); //sensor ID (1-12)
+  Serial.write(temp_counts2_H); //Temperature sensor counts high byte
+  Serial.write(temp_counts2_L); //Temperature sensor counts low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_temp2 = temp_counts2_H ^ temp_counts2_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_temp2); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  //Temperature Sensor 3
+  TS3.read_status();                       
+  TS3.read_config();                        
+  int temp_counts3 = TS3.read_temperature();  
+  int temp_counts3_H = ((temp_counts3  & 0xFF00) >> 8);
+  int temp_counts3_L = ((temp_counts3  & 0x00FF) >> 0);
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x01); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000111); //sensor ID (1-12)
+  Serial.write(temp_counts3_H); //Temperature sensor counts high byte
+  Serial.write(temp_counts3_L); //Temperature sensor counts low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_temp3 = temp_counts3_H ^ temp_counts3_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_temp3); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+  
+  //Temperature Sensor 4
+  TS4.read_status();                       
+  TS4.read_config();                        
+  int temp_counts4 = TS4.read_temperature();  
+  int temp_counts4_H = ((temp_counts4  & 0xFF00) >> 8);
+  int temp_counts4_L = ((temp_counts4  & 0x00FF) >> 0);
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x01); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000111); //sensor ID (1-12)
+  Serial.write(temp_counts4_H); //Temperature sensor counts high byte
+  Serial.write(temp_counts4_L); //Temperature sensor counts low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_temp4 = temp_counts4_H ^ temp_counts4_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_temp4); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+  
+  //Temperature Sensor 5
+  TS5.read_status();                       
+  TS5.read_config();                        
+  int temp_counts5 = TS5.read_temperature();  
+  int temp_counts5_H = ((temp_counts5  & 0xFF00) >> 8);
+  int temp_counts5_L = ((temp_counts5  & 0x00FF) >> 0);
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x01); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000111); //sensor ID (1-12)
+  Serial.write(temp_counts5_H); //Temperature sensor counts high byte
+  Serial.write(temp_counts5_L); //Temperature sensor counts low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_temp5 = temp_counts5_H ^ temp_counts5_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_temp5); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  //Temperature Sensor 6
+  TS6.read_status();                       
+  TS6.read_config();                        
+  int temp_counts6 = TS6.read_temperature();  
+  int temp_counts6_H = ((temp_counts6  & 0xFF00) >> 8);
+  int temp_counts6_L = ((temp_counts6  & 0x00FF) >> 0);
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x01); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000111); //sensor ID (1-12)
+  Serial.write(temp_counts6_H); //Temperature sensor counts high byte
+  Serial.write(temp_counts6_L); //Temperature sensor counts low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_temp6 = temp_counts6_H ^ temp_counts6_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_temp6); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+}
+
+//                       _                               _                
+//     /\               | |                             | |               
+//    /  \   ___ ___ ___| | ___ _ __ ___  _ __ ___   ___| |_ ___ _ __ ___ 
+//   / /\ \ / __/ __/ _ \ |/ _ \ '__/ _ \| '_ ` _ \ / _ \ __/ _ \ '__/ __|
+//  / ____ \ (_| (_|  __/ |  __/ | | (_) | | | | | |  __/ ||  __/ |  \__ \
+// /_/    \_\___\___\___|_|\___|_|  \___/|_| |_| |_|\___|\__\___|_|  |___/'
+
+if (millis() > prev_millis) //This if statement sets the frequency of the accelerometer measurements to 1 kHz
+{                                                                                                                             
+  prev_millis = millis();
+                     
+  ACC1.update_accel_counts();
+  int ACC1_X_counts = ACC1.ACX; //Read in the x-axis value
+  int ACC1_X_counts_H = ((ACC1_X_counts  & 0xFF00) >> 8); //x-axis value high byte
+  int ACC1_X_counts_L = ((ACC1_X_counts  & 0x00FF) >> 0); //x-axis value low byte
+  int ACC1_Y_counts = ACC1.ACY; //Read in the y-axis value
+  int ACC1_Y_counts_H = ((ACC1_Y_counts  & 0xFF00) >> 8); //y-axis value high byte
+  int ACC1_Y_counts_L = ((ACC1_Y_counts  & 0x00FF) >> 0); //y-axis value low byte   
+  int ACC1_Z_counts = ACC1.ACZ; //Read in the x-axis value
+  int ACC1_Z_counts_H = ((ACC1_Z_counts  & 0xFF00) >> 8); //z-axis value high byte
+  int ACC1_Z_counts_L = ((ACC1_Z_counts  & 0x00FF) >> 0); //z-axis value low byte   
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x00); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000001); //sensor ID (1-12)
+  Serial.write(ACC1_X_counts_H); //Accelerometer x-axis high byte
+  Serial.write(ACC1_X_counts_L); //Accelerometer x-axis low byte
+  Serial.write(ACC1_Y_counts_H); //Accelerometer y-axis high byte
+  Serial.write(ACC1_Y_counts_L); //Accelerometer y-axis low byte
+  Serial.write(ACC1_Z_counts_H); //Accelerometer z-axis high byte
+  Serial.write(ACC1_Z_counts_L); //Accelerometer z-axis low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_acc1 = ACC1_X_counts_H ^ ACC1_X_counts_L ^ ACC1_Y_counts_H ^ ACC1_Y_counts_L ^ ACC1_Z_counts_H ^ ACC1_Z_counts_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_acc1); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  ACC2.update_accel_counts();
+  int ACC2_X_counts = ACC2.ACX; //Read in the x-axis value
+  int ACC2_X_counts_H = ((ACC2_X_counts  & 0xFF00) >> 8); //x-axis value high byte
+  int ACC2_X_counts_L = ((ACC2_X_counts  & 0x00FF) >> 0); //x-axis value low byte
+  int ACC2_Y_counts = ACC2.ACY; //Read in the y-axis value
+  int ACC2_Y_counts_H = ((ACC2_Y_counts  & 0xFF00) >> 8); //y-axis value high byte
+  int ACC2_Y_counts_L = ((ACC2_Y_counts  & 0x00FF) >> 0); //y-axis value low byte   
+  int ACC2_Z_counts = ACC2.ACZ; //Read in the z-axis value
+  int ACC2_Z_counts_H = ((ACC2_Z_counts  & 0xFF00) >> 8); //z-axis value high byte
+  int ACC2_Z_counts_L = ((ACC2_Z_counts  & 0x00FF) >> 0); //z-axis value low byte
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x00); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000010); //sensor ID (1-12)
+  Serial.write(ACC2_X_counts_H); //Accelerometer x-axis high byte
+  Serial.write(ACC2_X_counts_L); //Accelerometer x-axis low byte
+  Serial.write(ACC2_Y_counts_H); //Accelerometer y-axis high byte
+  Serial.write(ACC2_Y_counts_L); //Accelerometer y-axis low byte
+  Serial.write(ACC2_Z_counts_H); //Accelerometer z-axis high byte
+  Serial.write(ACC2_Z_counts_L); //Accelerometer z-axis low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_acc2 = ACC2_X_counts_H ^ ACC2_X_counts_L ^ ACC2_Y_counts_H ^ ACC2_Y_counts_L ^ ACC2_Z_counts_H ^ ACC2_Z_counts_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_acc2); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  ACC3.update_accel_counts();
+  int ACC3_X_counts = ACC3.ACX; //Read in the x-axis value
+  int ACC3_X_counts_H = ((ACC3_X_counts  & 0xFF00) >> 8); //x-axis value high byte
+  int ACC3_X_counts_L = ((ACC3_X_counts  & 0x00FF) >> 0); //x-axis value low byte
+  int ACC3_Y_counts = ACC3.ACY; //Read in the y-axis value
+  int ACC3_Y_counts_H = ((ACC3_Y_counts  & 0xFF00) >> 8); //y-axis value high byte
+  int ACC3_Y_counts_L = ((ACC3_Y_counts  & 0x00FF) >> 0); //y-axis value low byte   
+  int ACC3_Z_counts = ACC3.ACZ; //Read in the z-axis value
+  int ACC3_Z_counts_H = ((ACC3_Z_counts  & 0xFF00) >> 8); //z-axis value high byte
+  int ACC3_Z_counts_L = ((ACC3_Z_counts  & 0x00FF) >> 0); //z-axis value low byte   
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x00); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000011); //sensor ID (1-12)
+  Serial.write(ACC3_X_counts_H); //Accelerometer x-axis high byte
+  Serial.write(ACC3_X_counts_L); //Accelerometer x-axis low byte
+  Serial.write(ACC3_Y_counts_H); //Accelerometer y-axis high byte
+  Serial.write(ACC3_Y_counts_L); //Accelerometer y-axis low byte
+  Serial.write(ACC3_Z_counts_H); //Accelerometer z-axis high byte
+  Serial.write(ACC3_Z_counts_L); //Accelerometer z-axis low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_acc3 = ACC3_X_counts_H ^ ACC3_X_counts_L ^ ACC3_Y_counts_H ^ ACC3_Y_counts_L ^ ACC3_Z_counts_H ^ ACC3_Z_counts_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_acc3); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  ACC4.update_accel_counts();
+  int ACC4_X_counts = ACC4.ACX; //Read in the x-axis value
+  int ACC4_X_counts_H = ((ACC4_X_counts  & 0xFF00) >> 8); //x-axis value high byte
+  int ACC4_X_counts_L = ((ACC4_X_counts  & 0x00FF) >> 0); //x-axis value low byte
+  int ACC4_Y_counts = ACC4.ACY; //Read in the y-axis value
+  int ACC4_Y_counts_H = ((ACC4_Y_counts  & 0xFF00) >> 8); //y-axis value high byte
+  int ACC4_Y_counts_L = ((ACC4_Y_counts  & 0x00FF) >> 0); //y-axis value low byte   
+  int ACC4_Z_counts = ACC4.ACZ; //Read in the z-axis value
+  int ACC4_Z_counts_H = ((ACC4_Z_counts  & 0xFF00) >> 8); //z-axis value high byte
+  int ACC4_Z_counts_L = ((ACC4_Z_counts  & 0x00FF) >> 0); //z-axis value low byte         
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x00); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000100); //sensor ID (1-12)
+  Serial.write(ACC4_X_counts_H); //Accelerometer x-axis high byte
+  Serial.write(ACC4_X_counts_L); //Accelerometer x-axis low byte
+  Serial.write(ACC4_Y_counts_H); //Accelerometer y-axis high byte
+  Serial.write(ACC4_Y_counts_L); //Accelerometer y-axis low byte
+  Serial.write(ACC4_Z_counts_H); //Accelerometer z-axis high byte
+  Serial.write(ACC4_Z_counts_L); //Accelerometer z-axis low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_acc4 = ACC4_X_counts_H ^ ACC4_X_counts_L ^ ACC4_Y_counts_H ^ ACC4_Y_counts_L ^ ACC4_Z_counts_H ^ ACC4_Z_counts_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_acc4); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  ACC5.update_accel_counts();
+  int ACC5_X_counts = ACC5.ACX; //Read in the x-axis value
+  int ACC5_X_counts_H = ((ACC5_X_counts  & 0xFF00) >> 8); //x-axis value high byte
+  int ACC5_X_counts_L = ((ACC5_X_counts  & 0x00FF) >> 0); //x-axis value low byte
+  int ACC5_Y_counts = ACC5.ACY; //Read in the y-axis value
+  int ACC5_Y_counts_H = ((ACC5_Y_counts  & 0xFF00) >> 8); //y-axis value high byte
+  int ACC5_Y_counts_L = ((ACC5_Y_counts  & 0x00FF) >> 0); //y-axis value low byte   
+  int ACC5_Z_counts = ACC5.ACZ; //Read in the z-axis value
+  int ACC5_Z_counts_H = ((ACC5_Z_counts  & 0xFF00) >> 8); //z-axis value high byte
+  int ACC5_Z_counts_L = ((ACC5_Z_counts  & 0x00FF) >> 0); //z-axis value low byte   
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x00); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000101); //sensor ID (1-12)
+  Serial.write(ACC5_X_counts_H); //Accelerometer x-axis high byte
+  Serial.write(ACC5_X_counts_L); //Accelerometer x-axis low byte
+  Serial.write(ACC5_Y_counts_H); //Accelerometer y-axis high byte
+  Serial.write(ACC5_Y_counts_L); //Accelerometer y-axis low byte
+  Serial.write(ACC5_Z_counts_H); //Accelerometer z-axis high byte
+  Serial.write(ACC5_Z_counts_L); //Accelerometer z-axis low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_acc5 = ACC5_X_counts_H ^ ACC5_X_counts_L ^ ACC5_Y_counts_H ^ ACC5_Y_counts_L ^ ACC5_Z_counts_H ^ ACC5_Z_counts_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_acc5); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+
+  ACC6.update_accel_counts();
+  int ACC6_X_counts = ACC6.ACX; //Read in the x-axis value
+  int ACC6_X_counts_H = ((ACC6_X_counts  & 0xFF00) >> 8); //x-axis value high byte
+  int ACC6_X_counts_L = ((ACC6_X_counts  & 0x00FF) >> 0); //x-axis value low byte
+  int ACC6_Y_counts = ACC6.ACY; //Read in the y-axis value
+  int ACC6_Y_counts_H = ((ACC6_Y_counts  & 0xFF00) >> 8); //y-axis value high byte
+  int ACC6_Y_counts_L = ((ACC6_Y_counts  & 0x00FF) >> 0); //y-axis value low byte   
+  int ACC6_Z_counts = ACC6.ACZ; //Read in the z-axis value
+  int ACC6_Z_counts_H = ((ACC6_Z_counts  & 0xFF00) >> 8); //z-axis value high byte
+  int ACC6_Z_counts_L = ((ACC6_Z_counts  & 0x00FF) >> 0); //z-axis value low byte   
+  Serial.write(0xA0); // 0xA0 "Begin Transmission 1/2"
+  Serial.write(0xA1); // 0xA1 "Begin Transmission 2/2"
+  Serial.write(0x00); // 0x00 for accelerometer, 0x01 for temperature sensor
+  Serial.write(0b00000110); //sensor ID (1-12)
+  Serial.write(ACC6_X_counts_H); //Accelerometer x-axis high byte
+  Serial.write(ACC6_X_counts_L); //Accelerometer x-axis low byte
+  Serial.write(ACC6_Y_counts_H); //Accelerometer y-axis high byte
+  Serial.write(ACC6_Y_counts_L); //Accelerometer y-axis low byte
+  Serial.write(ACC6_Z_counts_H); //Accelerometer z-axis high byte
+  Serial.write(ACC6_Z_counts_L); //Accelerometer z-axis low byte
+  Serial.write(SH); //Seconds high byte
+  Serial.write(SL); //Seconds low byte
+  Serial.write(MH); //Milliseconds high byte
+  Serial.write(ML); //Milliseconds low byte
+  Serial.write(UH); //Microseconds high byte
+  Serial.write(UH); //Microseconds low byte
+  int checksum_acc6 = ACC6_X_counts_H ^ ACC6_X_counts_L ^ ACC6_Y_counts_H ^ ACC6_Y_counts_L ^ ACC6_Z_counts_H ^ ACC6_Z_counts_L ^ SH ^ SL ^ MH ^ ML ^ UH ^ UL;
+  Serial.write(checksum_acc6); //checksum byte is computed by taking the XOR of all the payload and timestamp bytes
+  Serial.write(0x0D); // 0x0D "End of Transmission 1/2"
+  Serial.write(0x0A); // 0x0A "End of Transmission 2/2"
+}
+
+  /* 
+   *  The first two bytes of a data transmission will always be the hex values 0xA0 and then 0xA1 in that order. The next byte will indicate the kind of measurement, either 0 or 1 for accelerometer 
+   *  or temperature data respectively. The byte after that will indicate the sensor ID, allowing for up to 256 sensors (of which the system will use 12). The next sequence of bytes is called the 
+   *  payload. The payload is either length of 6 or 2 bytes, depending on if the sensor is an accelerometer or temperature sensor respectively. The next six bytes give the timestamp in this format: 
+   *  first the number of seconds in a high byte then low byte order, and then the number of additional milliseconds in the same high byte then low byte order, and finally the number of additional 
+   *  microseconds in the same order. A checksum byte, sent immediately after the timestamp bytes, is computed by taking the XOR of all the payload and timestamp bytes. Finally the transmission ends 
+   *  with the two hex values 0x0D and then 0x0A in that order. 
+
+      Message format:
+        0xA0
+        0xA1
+        RT
+        SN
+        {PL}
+        SH
+        SL
+        MH
+        ML
+        UH
+        UL
+        CS
+        0x0D
+        0x0A
+      
+      Temperature Sensor Payload:
+        Temperature High Byte
+        Temperature Low Byte
+      
+      Accelerometer Payload:
+        Acc. Axis 1 H
+        Acc. Axis 1 L
+        Acc. Axis 2 H
+        Acc. Axis 2 L
+        Acc. Axis 3 H
+        Acc. Axis 3 L 
+*/
+  
+}
